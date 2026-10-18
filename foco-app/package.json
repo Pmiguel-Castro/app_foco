@@ -1,0 +1,54 @@
+{
+  "name": "foco-app",
+  "version": "1.3.2",
+  "description": "Aplicativo desktop minimalista de gerenciamento de tarefas para combater a procrastinacao",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder",
+    "dist:dir": "electron-builder --dir"
+  },
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^32.0.0",
+    "electron-builder": "^26.15.3"
+  },
+  "allowScripts": {
+    "electron@32.3.3": true,
+    "electron-winstaller@5.4.0": true
+  },
+  "build": {
+    "appId": "com.foco.app",
+    "productName": "Foco",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "index.html",
+      "renderer.js",
+      "assets/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Foco"
+    }
+  }
+}

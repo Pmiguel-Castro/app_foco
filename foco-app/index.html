@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="pt-BR" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta
+    http-equiv="Content-Security-Policy"
+    content="default-src 'self'; script-src 'self' https://cdn.tailwindcss.com https://unpkg.com 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com;"
+  />
+  <title>Foco</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@0.544.0/dist/umd/lucide.min.js"></script>
+  <style>
+    /* Nunca deixa a janela inteira rolar (o scroll fica nas listas internas) */
+    html, body { overflow: hidden; max-width: 100vw; }
+    /* O atributo [hidden] deve vencer classes utilitarias de display (ex.: .flex) */
+    [hidden] { display: none !important; }
+    /* Icones (Lucide) — herdam a cor do texto do elemento pai */
+    .ico { display: inline-block; flex: none; vertical-align: -0.125em; pointer-events: none; }
+    /* Indicadores de posicao durante o arrastar-e-soltar */
+    .drop-before { box-shadow: inset 0 2px 0 0 #818cf8; }
+    .drop-after  { box-shadow: inset 0 -2px 0 0 #818cf8; }
+    /* Destaque do quadrante da Matriz de Eisenhower ao arrastar uma tarefa por cima */
+    .quadrant-drag-over { box-shadow: inset 0 0 0 2px #818cf8; background-color: rgba(99, 102, 241, 0.08); }
+    /* Scrollbar discreta no Dark Mode */
+    #task-list::-webkit-scrollbar,
+    #dashboard ::-webkit-scrollbar { width: 6px; height: 6px; }
+    #task-list::-webkit-scrollbar-thumb,
+    #dashboard ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+    #task-list { overflow-x: hidden; }
+    /* Deixa o icone do seletor de data visivel no tema escuro */
+    input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.7); }
+    /* Janela sem moldura: a barra de titulo vira a area de arrastar */
+    .app-drag { -webkit-app-region: drag; }
+    .app-no-drag { -webkit-app-region: no-drag; -webkit-user-select: none; }
+    /* Overlays flutuantes (modais/menus) sobrepoem a barra de titulo: precisam
+       ser 'no-drag' explicitamente, senao o Electron engole os cliques/foco. */
+    #habit-modal-backdrop,
+    #habit-time-modal-backdrop,
+    #workspace-modal-backdrop,
+    #habit-details-modal-backdrop,
+    #choice-backdrop,
+    #choice-menu,
+    #task-details {
+      -webkit-app-region: no-drag;
+    }
+    /* Campos do modal/menus continuam editaveis mesmo com o body em select-none */
+    #habit-modal-backdrop input,
+    #habit-modal-backdrop textarea,
+    #habit-time-modal-backdrop input,
+    #workspace-modal-backdrop input,
+    #habit-details-modal-backdrop textarea,
+    #choice-menu input {
+      -webkit-user-select: text;
+      user-select: text;
+    }
+    #toast { max-width: calc(100vw - 1rem); box-sizing: border-box; }
+    /* checklist longa dentro do modo foco rola em si mesma, sem empurrar os controles */
+    #focus-view .focus-steps { max-height: 30vh; overflow-y: auto; }
+    #focus-view .focus-steps::-webkit-scrollbar { width: 6px; }
+    #focus-view .focus-steps::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+
+    /* Modo widget / sobreposicao: interface enxuta, sem barras de rolagem */
+    .overlay-mode #app-footer,
+    .overlay-mode #app-subtitle,
+    .overlay-mode #context-bar,
+    .overlay-mode #dashboard { display: none !important; }
+    .overlay-mode .app-content { padding: 0.4rem 0.5rem 0.5rem; min-width: 0; }
+    .overlay-mode #app-header { margin-bottom: 0.3rem; }
+    .overlay-mode #app-header h1 { font-size: 0.9rem; }
+    .overlay-mode #task-list { font-size: 0.78rem; padding-right: 2px; }
+    /* modo widget: captura rapida — so a barra de texto e o botao Add */
+    .overlay-mode #task-form { margin-bottom: 0.35rem; }
+    /* ...mas nunca dentro do cronometro / arquivo */
+    body[data-layout="focus"] #task-form,
+    body[data-layout="archive"] #task-form { display: none !important; }
+    .overlay-mode #task-details,
+    .overlay-mode #task-details-btn { display: none !important; }
+    .overlay-mode #task-form > div { gap: 4px; }
+    .overlay-mode #task-input { padding: 0.25rem 0.5rem; font-size: 0.75rem; }
+    .overlay-mode #task-form button[type="submit"] { padding: 0.25rem 0.55rem; font-size: 0.75rem; }
+
+    /* Modo widget + cronometro: tudo cabe em 250x350 sem barras de rolagem */
+    .overlay-mode #focus-view { overflow: hidden; }
+    .overlay-mode .focus-center { gap: 0.3rem; padding: 0.35rem 0.35rem 0.45rem; }
+    .overlay-mode .focus-phase { font-size: 9px; letter-spacing: 0.15em; }
+    .overlay-mode #timer-display { font-size: 2.35rem !important; }
+    .overlay-mode .focus-pom { font-size: 10px; }
+    .overlay-mode .focus-title { font-size: 0.82rem; margin-top: 0.2rem; line-height: 1.2; }
+    .overlay-mode .focus-parent { font-size: 9px; }
+    /* no widget a checklist e omitida — o titulo ja mostra a tarefa/passo em foco */
+    .overlay-mode .focus-steps { display: none !important; }
+    .overlay-mode .focus-controls { margin-top: 0.4rem; gap: 0.3rem; }
+    .overlay-mode .focus-controls button { padding: 0.3rem 0.7rem !important; font-size: 0.72rem !important; }
+    .overlay-mode .focus-cfg { margin-top: 0.3rem; font-size: 10px; }
+    .overlay-mode .focus-cfg input { width: 2.1rem !important; }
+
+    /* Calendario */
+    .cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+    .cal-body { grid-auto-rows: minmax(46px, 1fr); }
+    .cal-cell {
+      display: flex; flex-direction: column; gap: 2px;
+      min-height: 0; padding: 3px 4px;
+      border: 1px solid #1e293b; border-radius: 6px;
+      background: rgba(30, 41, 59, 0.35); overflow: hidden;
+    }
+    .cal-cell.other-month { opacity: 0.38; }
+    .cal-cell.today { border-color: #6366f1; background: rgba(99, 102, 241, 0.12); }
+    .cal-daynum { font-size: 10px; color: #94a3b8; font-variant-numeric: tabular-nums; }
+    .cal-cell.today .cal-daynum { color: #a5b4fc; font-weight: 700; }
+    .cal-chip {
+      font-size: 10px; line-height: 1.35; padding: 1px 4px; border-radius: 4px;
+      background: #334155; color: #cbd5e1; cursor: pointer;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      border-left: 3px solid transparent;
+    }
+    .cal-chip.pri-low { border-left-color: #64748b; }
+    .cal-chip.pri-medium { border-left-color: #f59e0b; }
+    .cal-chip.pri-high {
+      background: #dc2626; color: #fff; font-weight: 600;
+      border-left-color: #fecaca; box-shadow: 0 0 0 1px rgba(220, 38, 38, 0.4);
+    }
+    .cal-chip.done { opacity: 0.45; text-decoration: line-through; }
+    .cal-more { font-size: 9px; color: #64748b; }
+    .cal-doneflag { font-size: 9px; color: #34d399; margin-top: auto; }
+    .cal-quickadd {
+      width: 100%; font-size: 10px; color: #e2e8f0;
+      background: #0f172a; border: 1px solid #6366f1; border-radius: 4px;
+      padding: 1px 3px; outline: none;
+    }
+    /* Aba Agenda: celulas maiores e mais informacao */
+    [data-layout="agenda"] .cal-body { grid-auto-rows: minmax(60px, 1fr); }
+    [data-layout="agenda"] .cal-chip { font-size: 11px; padding: 1px 5px; }
+    .cal-chip.projected { border-style: dashed; opacity: 0.62; }
+
+    /* Grade de horarios (Agenda: Semana / Dia) */
+    .tg-head, .tg-allday, .tg-grid { display: grid; }
+    .tg-colhead { padding: 3px 0; text-align: center; border-left: 1px solid #1e293b; }
+    .tg-colhead.today { background: rgba(99,102,241,0.14); border-radius: 4px 4px 0 0; }
+    .tg-colhead.today .text-sm { color: #a5b4fc; }
+    .tg-allday {
+      border-top: 1px solid #1e293b; border-bottom: 1px solid #1e293b;
+      min-height: 1.5rem; max-height: 5rem; overflow-y: auto;
+    }
+    .tg-alldaycell {
+      border-left: 1px solid #1e293b; padding: 2px 3px;
+      display: flex; flex-direction: column; gap: 2px; min-width: 0;
+    }
+    .tg-grid { position: relative; }
+    .tg-gutter { border-right: 1px solid #1e293b; }
+    .tg-hourlabel {
+      font-size: 9px; color: #64748b; text-align: right; padding-right: 5px;
+      transform: translateY(-6px);
+    }
+    .tg-col { position: relative; border-left: 1px solid #1e293b; }
+    .tg-col.today { background: rgba(99,102,241,0.06); }
+    .tg-hourrow { border-top: 1px solid #1e293b; cursor: pointer; }
+    .tg-hourrow:hover { background: rgba(148,163,184,0.06); }
+    /* Destaque da celula-alvo ao arrastar um bloco da agenda por cima (reagendar) */
+    .tg-hourrow-dragover { background: rgba(99,102,241,0.16); }
+    .tg-block {
+      position: absolute; left: 3px; right: 3px; z-index: 2;
+      border-radius: 4px; border-left: 3px solid transparent;
+      padding: 1px 4px; overflow: hidden; color: #e2e8f0; line-height: 1.15;
+    }
+    .tg-block.projected { border-left-style: dashed; opacity: 0.62; }
+    /* Alcas de redimensionar (topo/base) dos blocos com horario na Agenda */
+    .tg-resize-handle {
+      position: absolute; left: 0; right: 0; height: 8px; z-index: 10;
+      cursor: ns-resize;
+    }
+    .tg-resize-handle-top { top: 0; }
+    .tg-resize-handle-bottom { bottom: 0; }
+    /* Bloco fantasma do "arrastar pra criar" (sweep-to-create) num slot vazio */
+    .tg-ghost-sweep {
+      position: absolute; left: 3px; right: 3px; z-index: 10;
+      border-radius: 4px; border: 1px dashed #4f46e5;
+      background: rgba(79, 70, 229, 0.3); pointer-events: none;
+    }
+    .tg-now {
+      position: absolute; left: 0; right: 0; height: 2px;
+      background: #ef4444; z-index: 4; pointer-events: none;
+    }
+    .tg-now::before {
+      content: ''; position: absolute; left: 0; top: -3px;
+      width: 8px; height: 8px; border-radius: 50%; background: #ef4444;
+    }
+    .tg-scroll::-webkit-scrollbar { width: 8px; }
+    .tg-scroll::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+
+    /* Largura de conteudo contida (toggle no cabecalho) — so o miolo das abas
+       Hoje/Tarefas; o rodape e a aba Agenda ficam sempre de ponta a ponta. */
+    #content-main.contained { max-width: 64rem; margin-left: auto; margin-right: auto; }
+
+    /* Aba Habitos: dashboard de 2 colunas */
+    .habits-dash {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 2rem;
+      align-items: start; width: 100%;
+    }
+    @media (max-width: 900px) {
+      .habits-dash { grid-template-columns: 1fr; gap: 1.25rem; }
+    }
+    .habit-panel {
+      border: 1px solid #1e293b; background: rgba(15, 23, 42, 0.4);
+      border-radius: 0.75rem; padding: 1rem; min-width: 0;
+    }
+    @media (min-width: 640px) { .habit-panel { padding: 1.25rem; } }
+    .habit-panel-title {
+      font-size: 11px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.14em; color: #94a3b8; margin-bottom: 0.85rem;
+    }
+
+    /* grade semanal */
+    .habits-week { display: flex; flex-direction: column; min-width: 26rem; max-width: 42rem; }
+    .habits-week-row {
+      display: grid;
+      /* ultima coluna FIXA para o cabecalho de dias e as celulas ficarem
+         perfeitamente alinhados (cada linha e um grid independente) */
+      grid-template-columns: minmax(0, 1fr) 3rem auto 3.75rem;
+      align-items: center;
+      column-gap: 0.85rem;
+      padding: 0.55rem 0;
+    }
+    .habits-week-row + .habits-week-row { border-top: 1px solid rgba(30, 41, 59, 0.85); }
+    .habits-week-head { padding: 0 0 0.45rem; }
+    .hb-week { display: flex; gap: 6px; }
+    .hb-cell {
+      width: 32px; height: 32px; border-radius: 6px; flex: none;
+      display: flex; align-items: center; justify-content: center;
+      color: #fff; cursor: pointer;
+      transition: filter .12s ease, background-color .12s ease, transform .07s ease;
+    }
+    .hb-cell:active { transform: scale(0.9); }
+    .hb-cell.done:hover { filter: brightness(1.14); }
+    .hb-cell.pending { background: rgba(51, 65, 85, 0.45); }
+    .hb-cell.pending:hover { background: rgba(71, 85, 105, 0.6); }
+    .hb-daylabel { width: 32px; text-align: center; font-size: 10px; font-weight: 600; color: #64748b; }
+    .hb-daylabel.hb-daylabel-today { color: #cbd5e1; }
+    .habits-week-scroll { overflow-x: auto; }
+    .habits-week-scroll::-webkit-scrollbar { height: 6px; }
+    .habits-week-scroll::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+
+    /* painel "tempo alocado" — barras horizontais grossas e arredondadas */
+    .alloc-list {
+      display: flex; flex-direction: column; gap: 1rem;
+    }
+    .alloc-row { display: flex; align-items: center; gap: 0.75rem; }
+    /* mesma tipografia do nome do habito no painel esquerdo (text-sm font-medium text-slate-100) */
+    .alloc-name {
+      flex: 0 0 8rem; width: 8rem;
+      font-size: 0.875rem; font-weight: 500; line-height: 1.25rem; color: #f1f5f9;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    @media (max-width: 900px) { .alloc-name { flex-basis: 9rem; width: 9rem; } }
+    .alloc-track {
+      flex: 1 1 auto; min-width: 1.75rem;
+      height: 18px; border-radius: 9999px;
+      background: rgba(51, 65, 85, 0.5); overflow: hidden;
+    }
+    .alloc-fill {
+      height: 100%; border-radius: 9999px; min-width: 10px;
+      transition: width .3s ease;
+    }
+    .alloc-time {
+      flex: none; font-size: 11px; font-weight: 500;
+      color: #94a3b8; font-variant-numeric: tabular-nums;
+    }
+
+    /* Menu lateral */
+    #sidebar { background: rgba(2, 6, 23, 0.55); }
+    #sidebar nav::-webkit-scrollbar { width: 6px; }
+    #sidebar nav::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+    /* sem menu lateral no modo foco / widget */
+    .overlay-mode #sidebar,
+    body[data-layout="focus"] #sidebar { display: none !important; }
+
+    #toast { opacity: 0; pointer-events: none; }
+  </style>
+</head>
+<body class="bg-slate-900 text-slate-100 h-screen overflow-hidden select-none flex flex-col">
+
+  <div id="titlebar" class="app-drag shrink-0 flex items-center justify-end gap-1 h-7 px-2 border-b border-slate-800/60">
+    <button
+      id="widget-cfg-btn"
+      type="button"
+      title="Filtros do widget"
+      hidden
+      class="app-no-drag mr-1 w-6 h-6 flex items-center justify-center rounded text-slate-500 hover:bg-slate-800 hover:text-slate-300 transition-colors"
+    ></button>
+    <button
+      id="pin-btn"
+      type="button"
+      title="Modo widget"
+      class="app-no-drag w-6 h-6 flex items-center justify-center rounded text-slate-500 hover:bg-slate-800 hover:text-slate-300 transition-colors"
+    ></button>
+    <button
+      id="min-btn"
+      type="button"
+      title="Minimizar"
+      class="app-no-drag w-6 h-6 flex items-center justify-center rounded text-slate-500 hover:bg-slate-800 hover:text-slate-300 transition-colors"
+    ></button>
+    <button
+      id="max-btn"
+      type="button"
+      title="Maximizar"
+      class="app-no-drag w-6 h-6 flex items-center justify-center rounded text-slate-500 hover:bg-slate-800 hover:text-slate-300 transition-colors"
+    ></button>
+    <button
+      id="close-btn"
+      type="button"
+      title="Fechar (continua na bandeja do sistema)"
+      class="app-no-drag w-6 h-6 flex items-center justify-center rounded text-slate-500 hover:bg-red-600 hover:text-white transition-colors"
+    ></button>
+  </div>
+
+  <div class="flex flex-1 min-h-0">
+
+  <aside id="sidebar" class="shrink-0 w-36 flex flex-col border-r border-slate-800 min-h-0"></aside>
+
+  <div id="app-content" class="app-content flex flex-col flex-1 min-h-0 min-w-0 p-4">
+
+    <div id="content-main" class="flex flex-col flex-1 min-h-0 w-full">
+
+    <header id="app-header" class="mb-2">
+      <div class="flex items-center justify-between gap-2">
+        <h1 id="view-title" class="text-lg font-semibold tracking-tight">Hoje</h1>
+        <div id="header-action" class="flex items-center gap-1"></div>
+      </div>
+      <p id="app-subtitle" class="text-xs text-slate-500 mt-0.5">Uma tarefa de cada vez.</p>
+    </header>
+
+    <div id="context-bar" class="flex flex-wrap items-center gap-x-3 gap-y-1 mb-2 text-xs"></div>
+
+    <form id="task-form" class="relative mb-3">
+      <div class="flex gap-2">
+        <input
+          id="task-input"
+          type="text"
+          autocomplete="off"
+          placeholder="No que voce vai trabalhar?"
+          class="flex-1 min-w-0 bg-slate-800 border border-slate-700 rounded-md px-3 py-2 text-sm
+                 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+        />
+        <button
+          id="task-details-btn"
+          type="button"
+          title="Data, horario e recorrencia"
+          aria-expanded="false"
+          class="shrink-0 w-9 flex items-center justify-center bg-slate-800 border border-slate-700
+                 rounded-md text-slate-500 hover:text-slate-300 hover:border-slate-600
+                 transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500"
+        ></button>
+        <button
+          type="submit"
+          class="shrink-0 bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 transition-colors
+                 rounded-md px-3 py-2 text-sm font-medium"
+        >
+          Add
+        </button>
+      </div>
+
+      <div
+        id="task-details"
+        hidden
+        class="absolute right-0 top-full mt-1.5 z-30 w-64 rounded-lg border border-slate-700
+               bg-slate-900 shadow-xl p-3 space-y-2.5 text-xs"
+      >
+        <div class="flex items-center justify-between">
+          <span class="font-medium text-slate-300">Detalhes da tarefa</span>
+          <button
+            id="task-details-clear"
+            type="button"
+            class="text-slate-500 hover:text-slate-300 transition-colors"
+          >
+            Limpar
+          </button>
+        </div>
+        <label id="task-date-row" class="flex items-center justify-between gap-2">
+          <span class="text-slate-400">Data</span>
+          <input
+            id="task-date"
+            type="date"
+            class="bg-slate-800 border border-slate-700 rounded px-1.5 py-1 text-xs text-slate-200
+                   focus:outline-none focus:ring-1 focus:ring-indigo-500"
+          />
+        </label>
+        <div class="flex items-center justify-between gap-2">
+          <span class="text-slate-400">Horario</span>
+          <span class="flex items-center gap-1">
+            <input
+              id="task-start"
+              type="time"
+              title="Horario de inicio"
+              class="bg-slate-800 border border-slate-700 rounded px-1 py-1 text-xs text-slate-200
+                     focus:outline-none focus:ring-1 focus:ring-indigo-500"
+            />
+            <span class="text-slate-600">–</span>
+            <input
+              id="task-end"
+              type="time"
+              title="Horario de termino"
+              class="bg-slate-800 border border-slate-700 rounded px-1 py-1 text-xs text-slate-200
+                     focus:outline-none focus:ring-1 focus:ring-indigo-500"
+            />
+          </span>
+        </div>
+        <label class="flex items-center justify-between gap-2">
+          <span class="text-slate-400">Recorrencia</span>
+          <select
+            id="recur-select"
+            title="Frequencia da tarefa"
+            class="bg-slate-800 border border-slate-700 rounded px-1.5 py-1 text-xs text-slate-200
+                   focus:outline-none focus:ring-1 focus:ring-indigo-500"
+          >
+            <option value="once">Unica</option>
+            <option value="daily">Diaria</option>
+            <option value="weekly">Semanal</option>
+            <option value="monthly">Mensal</option>
+            <option value="custom">Personalizado...</option>
+          </select>
+        </label>
+        <div id="recur-custom" hidden class="rounded-md border border-slate-700 bg-slate-800/40 p-2"></div>
+        <label class="flex items-center justify-between gap-2">
+          <span class="text-slate-400">Prioridade</span>
+          <select
+            id="task-prio"
+            title="Prioridade da tarefa"
+            class="bg-slate-800 border border-slate-700 rounded px-1.5 py-1 text-xs text-slate-200
+                   focus:outline-none focus:ring-1 focus:ring-indigo-500"
+          >
+            <option value="low">Baixa</option>
+            <option value="medium" selected>Media</option>
+            <option value="high">Alta</option>
+          </select>
+        </label>
+        <label id="task-ws-row" class="flex items-center justify-between gap-2" hidden>
+          <span class="text-slate-400">Workspace</span>
+          <select
+            id="task-ws"
+            title="Workspace da tarefa"
+            class="bg-slate-800 border border-slate-700 rounded px-1.5 py-1 text-xs text-slate-200
+                   focus:outline-none focus:ring-1 focus:ring-indigo-500"
+          ></select>
+        </label>
+        <label id="task-habit-row" class="flex items-center justify-between gap-2" hidden>
+          <span class="text-slate-400">Habito</span>
+          <select
+            id="task-habit"
+            title="Vincular a um habito"
+            class="bg-slate-800 border border-slate-700 rounded px-1.5 py-1 text-xs text-slate-200
+                   focus:outline-none focus:ring-1 focus:ring-indigo-500"
+          >
+            <option value="">Nenhum</option>
+          </select>
+        </label>
+      </div>
+    </form>
+
+    <ul id="task-list" class="flex-1 min-h-0 overflow-y-auto space-y-2 pr-1"></ul>
+
+    <div id="dashboard" class="hidden flex-1 min-h-0"></div>
+
+    <div id="focus-view" class="hidden flex flex-col flex-1 overflow-y-auto"></div>
+
+    </div>
+
+    <footer
+      id="app-footer"
+      class="pt-3 mt-2 border-t border-slate-800 text-xs text-slate-500
+             flex items-center justify-between gap-2"
+    ></footer>
+
+  </div>
+
+  </div>
+
+  <div id="toast" class="fixed left-1/2 -translate-x-1/2 bottom-3 bg-slate-950/90 border border-slate-700 text-slate-200 text-xs px-3 py-1.5 rounded-md shadow-lg z-50 transition-opacity"></div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>
